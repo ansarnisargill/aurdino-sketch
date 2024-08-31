@@ -27,6 +27,7 @@ void setup() {  // put your setup code here, to run once
   initModule("AT+CPIN?", "READY", 1000);        //this command is used to check whether SIM card is inserted in GSM Module or not
   initModule("AT+CMGF=1", "OK", 1000);          //Configuring TEXT mode
   initModule("AT+CNMI=2,2,0,0,0", "OK", 1000);  //Decides how newly arrived SMS messages should be handled
+  initModule("AT+CLCC=1", "OK", 1000);          //Enable reporting of call status changes
   Serial.println("Initialized Successfully");
 }
 
@@ -70,6 +71,25 @@ void loop() {
         }
       }
     }
+
+    else if (inchar == '+') {
+      // Check for incoming SMS
+      String incomingSMS = GSM.readString();
+      if (incomingSMS.indexOf("+CMT:") != -1) {
+        // Extract sender's number and message content
+        int colonIndex = incomingSMS.indexOf(":");
+        int commaIndex = incomingSMS.indexOf(",", colonIndex);
+        String senderNumber = incomingSMS.substring(colonIndex + 2, commaIndex - 1);
+        
+        int newlineIndex = incomingSMS.lastIndexOf("\n");
+        String messageContent = incomingSMS.substring(newlineIndex + 1);
+        messageContent.trim();
+        
+        if (messageContent == "ST") {
+          sendLEDStatus(senderNumber.c_str());
+        }
+      }
+    }
   }
 
 
@@ -83,12 +103,16 @@ void loop() {
   delay(5);
 }
 
-
+void sendLEDStatus(const char* number) {
+  String status = "LED Status:\n";
+  status += "LED: " + String(digitalRead(LED) ? "ON" : "OFF");
+  sendSMS(number, status.c_str());
+}
 
 void sendSMS(char *number, char *msg) {
   GSM.print("AT+CMGS=\"");
   GSM.print(number);
-  GSM.println("\"\r\n");  //AT+CMGS=”Mobile Number” <ENTER> - Assigning recipient’s mobile number
+  GSM.println("\"\r\n");  //AT+CMGS="Mobile Number" <ENTER> - Assigning recipient's mobile number
   delay(500);
   GSM.println(msg);  // Message contents
   delay(500);
@@ -97,49 +121,69 @@ void sendSMS(char *number, char *msg) {
 }
 
 void callUp(char *number1, char *number2) {
-  int callPicked = 0;
-  int numberIteration = 1;
-  while (callPicked == 1) {
-    if (numberIteration == 1) {
-      Serial.println("Dialing number1");
-      GSM.print("ATD + ");GSM.print(number1);GSM.println(";");
-      numberIteration = 2;
-    } else {
-      Serial.println("Dialing number2");
-      GSM.print("ATD + ");GSM.print(number2);GSM.println(";");
-      numberIteration = 1;
-    }
+  int callAttempts = 0;
+  const int maxAttempts = 2;
 
-    // Wait for response with timeout
+  while (callAttempts < maxAttempts) {
+    char* currentNumber = (callAttempts % 2 == 0) ? number1 : number2;
+    
+    Serial.print("Dialing number: ");
+    Serial.println(currentNumber);
+    
+    GSM.print("ATD");
+    GSM.print(currentNumber);
+    GSM.println(";");
+
     unsigned long startTime = millis();
     String response = "";
-    while (millis() - startTime < 30000) {  // 30 second timeout
+    bool callConnected = false;
+
+    while (millis() - startTime < 60000) { // 60 second timeout for each call attempt
       if (GSM.available()) {
         char c = GSM.read();
         response += c;
-        if (response.indexOf("NO CARRIER") != -1) {
-          break;
+        Serial.print(c); // Print each character for debugging
+
+        if (response.indexOf("NO CARRIER") != -1 || 
+            response.indexOf("BUSY") != -1 || 
+            response.indexOf("NO ANSWER") != -1 || 
+            response.indexOf("NO DIALTONE") != -1) {
+          break; // Call failed, try next number
         }
-        if (response.indexOf("BUSY") != -1) {
-          break;
-        }
-        if (response.indexOf("NO DIALTONE") != -1) {
-          break;
-        }
-        if (response.indexOf("OK") != -1 && response.indexOf("CONNECT") != -1) {
-          callPicked = 1;
+
+        if (response.indexOf("+CLCC: 1,0,0,0,0") != -1) {
+          callConnected = true;
+          Serial.println("Call connected!");
+          // Wait for the call to end
+          while (GSM.available()) {
+            char c = GSM.read();
+            Serial.print(c);
+            if (String(c).indexOf("NO CARRIER") != -1) {
+              Serial.println("Call ended");
+              break;
+            }
+          }
           break;
         }
       }
       delay(10);
     }
 
-    Serial.println("Response of call: " + response);
-    GSM.println("ATH");  // Hang up
-    delay(5000);
-  }
-}
+    GSM.println("ATH"); // Hang up in case the call is still ongoing
+    delay(1000);
 
+    if (callConnected) {
+      Serial.println("Call was successful");
+      return; // Exit the function if a call was connected
+    } else {
+      Serial.println("Call failed. Trying next number.");
+    }
+
+    callAttempts++;
+  }
+
+  Serial.println("All call attempts failed");
+}
 
 void initModule(String cmd, char *res, int t) {
   while (1) {
