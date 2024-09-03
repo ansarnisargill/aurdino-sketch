@@ -2,10 +2,16 @@
 SoftwareSerial GSM(8, 9);    //SIM800L Tx & Rx is connected to Arduino #8 & #9
 
 char phone_no1[] = "+923217432026";
-char phone_no2[] = "+923074257049";
+char phone_no2[] = "+923227646775";
 
-#define bt_M A0  // Button1 Pin A0 use for Send Message
-#define bt_C A1  // Button2 Pin A1 use for Call
+#define bt_MESSAGE A0  // Button1 Pin A0 use for Send Message
+#define bt_CALL A1  // Button2 Pin A1 use for Call
+#define bt_WAPDA_ON A2  
+#define bt_WAPDA_OFF A3  
+#define bt_MOTOR_OFF A4 
+#define bt_SECURITY_ALERT A5 
+
+
 
 #define LED 2  // Led Pin D2 use for LED
 
@@ -16,8 +22,12 @@ void setup() {  // put your setup code here, to run once
   Serial.begin(9600);  //Begin serial communication with Arduino and Arduino IDE (Serial Monitor)
   GSM.begin(9600);     //Begin serial communication with Arduino and SIM800L
 
-  pinMode(bt_M, INPUT_PULLUP);  // declare bt_M as input
-  pinMode(bt_C, INPUT_PULLUP);  // declare bt_C as input
+  pinMode(bt_MESSAGE, INPUT_PULLUP); 
+  pinMode(bt_CALL, INPUT_PULLUP);  
+  pinMode(bt_WAPDA_ON, INPUT_PULLUP);  
+  pinMode(bt_WAPDA_OFF, INPUT_PULLUP); 
+  pinMode(bt_MOTOR_OFF, INPUT_PULLUP);  
+  pinMode(bt_SECURITY_ALERT, INPUT_PULLUP);  
 
   pinMode(LED, OUTPUT);  // declare LED as output
 
@@ -35,83 +45,90 @@ void loop() {
 
   if (GSM.available() > 0) {
     inchar = GSM.read();
-    Serial.print(inchar);
-    if (inchar == 'R') {
-      inchar = GSM.read();
-      if (inchar == 'I') {
-        inchar = GSM.read();
-        if (inchar == 'N') {
-          inchar = GSM.read();
-          if (inchar == 'G') {
-            initModule("ATH", "OK", 1000);  // this command is used for Call busy
-          }
-        }
-      }
-    }
-
-    else if (inchar == 'L') {
-      delay(10);
-      inchar = GSM.read();
-      if (inchar == 'E') {
-        delay(10);
-        inchar = GSM.read();
-        if (inchar == 'D') {
-          delay(10);
-          inchar = GSM.read();
-
-          if (inchar == '1') {
-            digitalWrite(LED, 1);
-            sendSMS(phone_no1, "LED is On");
-            sendSMS(phone_no2, "LED is On");
-          } else if (inchar == '0') {
-            digitalWrite(LED, 0);
-            sendSMS(phone_no1, "LED is Off");
-            sendSMS(phone_no2, "LED is Off");
-          }
-        }
-      }
-    }
-
-    else if (inchar == '+') {
-      // Check for incoming SMS
+    if (inchar == '+') {
       String incomingSMS = GSM.readString();
+      Serial.println("Received Message");
+      Serial.println(incomingSMS);
+      
+      if (incomingSMS.indexOf("RING") != -1){
+        initModule("ATH", "OK", 1000);
+      }
+      if (incomingSMS.indexOf("L1") != -1){
+        digitalWrite(LED, 1);
+        sendSMS("MOTOR ON");
+      }
+      if (incomingSMS.indexOf("L0") != -1){
+        digitalWrite(LED, 0);
+        sendSMS("MOTOR OFF");
+      }
+      if (incomingSMS.indexOf("ST") != -1){
+        sendLEDStatus();
+      }
       if (incomingSMS.indexOf("+CMT:") != -1) {
+
         // Extract sender's number and message content
         int colonIndex = incomingSMS.indexOf(":");
         int commaIndex = incomingSMS.indexOf(",", colonIndex);
         String senderNumber = incomingSMS.substring(colonIndex + 2, commaIndex - 1);
-        
+
         int newlineIndex = incomingSMS.lastIndexOf("\n");
         String messageContent = incomingSMS.substring(newlineIndex + 1);
         messageContent.trim();
-        
+
         if (messageContent == "ST") {
-          sendLEDStatus(senderNumber.c_str());
+          sendLEDStatus();
         }
       }
     }
   }
 
 
-  if (digitalRead(bt_M) == 0) {
-    sendSMS(phone_no1, "Hello Muhammad Ansar from GSM SMS");
+  if (digitalRead(bt_MESSAGE) == 0) {
+    digitalWrite(LED, 1);
+    sendSMS("LED ON");
   }
-  if (digitalRead(bt_C) == 0) {
+
+  if (digitalRead(bt_CALL) == 0) {
     callUp(phone_no1, phone_no2);
+  }
+
+  if (digitalRead(bt_WAPDA_ON) == 0) {
+    sendSMS("WAPDA ON");
+  }
+
+  if (digitalRead(bt_WAPDA_OFF) == 0) {
+    sendSMS("WAPDA OFF");
+  }
+
+  if (digitalRead(bt_MOTOR_OFF) == 0) {
+    sendSMS("MOTOR OFF");
+  }
+
+  if (digitalRead(bt_SECURITY_ALERT) == 0) {
+    sendSMS("SECURITY ALERT");
   }
 
   delay(5);
 }
 
-void sendLEDStatus(const char* number) {
-  String status = "LED Status:\n";
-  status += "LED: " + String(digitalRead(LED) ? "ON" : "OFF");
-  sendSMS(number, status.c_str());
+void sendLEDStatus() {
+  String status = "Status:\n";
+  status += "MOTOR: " + String(digitalRead(LED) ? "ON" : "OFF");
+  sendSMS(status.c_str());
 }
 
-void sendSMS(char *number, char *msg) {
+void sendSMS(char *msg) {
   GSM.print("AT+CMGS=\"");
-  GSM.print(number);
+  GSM.print(phone_no1);
+  GSM.println("\"\r\n");  //AT+CMGS="Mobile Number" <ENTER> - Assigning recipient's mobile number
+  delay(500);
+  GSM.println(msg);  // Message contents
+  delay(500);
+  GSM.write(byte(26));  //Ctrl+Z  send message command (26 in decimal).
+  delay(3000);
+
+  GSM.print("AT+CMGS=\"");
+  GSM.print(phone_no2);
   GSM.println("\"\r\n");  //AT+CMGS="Mobile Number" <ENTER> - Assigning recipient's mobile number
   delay(500);
   GSM.println(msg);  // Message contents
@@ -122,33 +139,28 @@ void sendSMS(char *number, char *msg) {
 
 void callUp(char *number1, char *number2) {
   int callAttempts = 0;
-  const int maxAttempts = 2;
+  const int maxAttempts = 50;
 
   while (callAttempts < maxAttempts) {
-    char* currentNumber = (callAttempts % 2 == 0) ? number1 : number2;
-    
+    char *currentNumber = (callAttempts % 2 == 0) ? number1 : number2;
+
     Serial.print("Dialing number: ");
     Serial.println(currentNumber);
-    
-    GSM.print("ATD");
-    GSM.print(currentNumber);
-    GSM.println(";");
+
+    GSM.print("ATD");GSM.print(currentNumber);GSM.println(";");
 
     unsigned long startTime = millis();
     String response = "";
     bool callConnected = false;
 
-    while (millis() - startTime < 60000) { // 60 second timeout for each call attempt
+    while (millis() - startTime < 60000) {  // 60 second timeout for each call attempt
       if (GSM.available()) {
         char c = GSM.read();
         response += c;
-        Serial.print(c); // Print each character for debugging
+        Serial.print(c);  // Print each character for debugging
 
-        if (response.indexOf("NO CARRIER") != -1 || 
-            response.indexOf("BUSY") != -1 || 
-            response.indexOf("NO ANSWER") != -1 || 
-            response.indexOf("NO DIALTONE") != -1) {
-          break; // Call failed, try next number
+        if (response.indexOf("NO CARRIER") != -1 || response.indexOf("BUSY") != -1 || response.indexOf("NO ANSWER") != -1 || response.indexOf("NO DIALTONE") != -1) {
+          break;  // Call failed, try next number
         }
 
         if (response.indexOf("+CLCC: 1,0,0,0,0") != -1) {
@@ -169,12 +181,12 @@ void callUp(char *number1, char *number2) {
       delay(10);
     }
 
-    GSM.println("ATH"); // Hang up in case the call is still ongoing
+    GSM.println("ATH");  // Hang up in case the call is still ongoing
     delay(1000);
 
     if (callConnected) {
       Serial.println("Call was successful");
-      return; // Exit the function if a call was connected
+      return;  // Exit the function if a call was connected
     } else {
       Serial.println("Call failed. Trying next number.");
     }
